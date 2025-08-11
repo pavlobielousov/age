@@ -10,6 +10,7 @@ agtype_coercions
 agtype_string
 age_query
 age_scalar
+age_shortest_paths
 age_string
 age_trig
 age_aggregate
