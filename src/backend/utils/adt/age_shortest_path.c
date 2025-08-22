@@ -132,7 +132,11 @@ static void free_bfs_queue(BFS_queue *queue)
 /*
  * BFS shortest path algorithm
  * Returns a list of graphids representing the shortest path
+ * 
+ * NOTE: Currently unused - will be integrated when graph traversal is fully debugged
  */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
 static List *bfs_shortest_path(GRAPH_global_context *ggctx, graphid start_vertex, graphid end_vertex, int max_hops)
 {
     BFS_queue *queue;
@@ -299,6 +303,7 @@ static List *bfs_shortest_path(GRAPH_global_context *ggctx, graphid start_vertex
     
     return result_path;
 }
+#pragma GCC diagnostic pop
 
 /*
  * PostgreSQL function: age_shortest_path
@@ -333,6 +338,9 @@ Datum age_shortest_path(PG_FUNCTION_ARGS)
     
     if (!PG_ARGISNULL(3))
         max_hops = PG_GETARG_INT32(3);
+    
+    /* Avoid unused variable warning - will be used when BFS is fully integrated */
+    (void) max_hops;
     
     /* Get graph OID */
     graph_oid = get_graph_oid(graph_name);
@@ -425,7 +433,7 @@ PG_FUNCTION_INFO_V1(age_shortest_path_cypher);
 Datum age_shortest_path_cypher(PG_FUNCTION_ARGS)
 {
     agtype *path_expr;
-    Name graph_name;
+    agtype_in_state result_state;
     
     /* For now, return a simple placeholder - this needs full path parsing implementation */
     if (PG_ARGISNULL(0))
@@ -441,16 +449,16 @@ Datum age_shortest_path_cypher(PG_FUNCTION_ARGS)
      * Then call the underlying shortest path algorithm
      */
     
-    /* Placeholder: return empty path array for now */
-    agtype_value agtv_result;
-    agtype_in_state result_state;
+    /* Avoid unused variable warning */
+    (void) path_expr;
     
+    /* Placeholder: return empty path array for now */
     MemSet(&result_state, 0, sizeof(agtype_in_state));
     
-    push_agtype_value(&result_state, WAGT_BEGIN_ARRAY, NULL);
-    agtv_result = *push_agtype_value(&result_state, WAGT_END_ARRAY, NULL);
+    result_state.res = push_agtype_value(&result_state.parse_state, WAGT_BEGIN_ARRAY, NULL);
+    result_state.res = push_agtype_value(&result_state.parse_state, WAGT_END_ARRAY, NULL);
     
-    PG_RETURN_POINTER(agtype_value_to_agtype(&agtv_result));
+    PG_RETURN_POINTER(agtype_value_to_agtype(result_state.res));
 }
 
 /*
@@ -464,6 +472,7 @@ Datum age_k_shortest_paths_cypher(PG_FUNCTION_ARGS)
 {
     agtype *path_expr;
     int32 k;
+    agtype_in_state result_state;
     
     /* For now, return a simple placeholder */
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
@@ -474,16 +483,17 @@ Datum age_k_shortest_paths_cypher(PG_FUNCTION_ARGS)
     
     /* TODO: Parse path expression and implement k-shortest paths */
     
-    /* Placeholder: return empty path array for now */
-    agtype_value agtv_result;
-    agtype_in_state result_state;
+    /* Avoid unused variable warnings */
+    (void) path_expr;
+    (void) k;
     
+    /* Placeholder: return empty path array for now */
     MemSet(&result_state, 0, sizeof(agtype_in_state));
     
-    push_agtype_value(&result_state, WAGT_BEGIN_ARRAY, NULL);
-    agtv_result = *push_agtype_value(&result_state, WAGT_END_ARRAY, NULL);
+    result_state.res = push_agtype_value(&result_state.parse_state, WAGT_BEGIN_ARRAY, NULL);
+    result_state.res = push_agtype_value(&result_state.parse_state, WAGT_END_ARRAY, NULL);
     
-    PG_RETURN_POINTER(agtype_value_to_agtype(&agtv_result));
+    PG_RETURN_POINTER(agtype_value_to_agtype(result_state.res));
 }
 
 /*
@@ -497,6 +507,7 @@ Datum age_weighted_shortest_path_cypher(PG_FUNCTION_ARGS)
 {
     agtype *path_expr;
     agtype *weight_property;
+    agtype_in_state result_state;
     
     /* For now, return a simple placeholder */
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
@@ -507,14 +518,15 @@ Datum age_weighted_shortest_path_cypher(PG_FUNCTION_ARGS)
     
     /* TODO: Parse path expression and weight property, implement Dijkstra */
     
-    /* Placeholder: return empty path array for now */
-    agtype_value agtv_result;
-    agtype_in_state result_state;
+    /* Avoid unused variable warnings */
+    (void) path_expr;
+    (void) weight_property;
     
+    /* Placeholder: return empty path array for now */
     MemSet(&result_state, 0, sizeof(agtype_in_state));
     
-    push_agtype_value(&result_state, WAGT_BEGIN_ARRAY, NULL);
-    agtv_result = *push_agtype_value(&result_state, WAGT_END_ARRAY, NULL);
+    result_state.res = push_agtype_value(&result_state.parse_state, WAGT_BEGIN_ARRAY, NULL);
+    result_state.res = push_agtype_value(&result_state.parse_state, WAGT_END_ARRAY, NULL);
     
-    PG_RETURN_POINTER(agtype_value_to_agtype(&agtv_result));
+    PG_RETURN_POINTER(agtype_value_to_agtype(result_state.res));
 }
