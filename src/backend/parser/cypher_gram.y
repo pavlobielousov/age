@@ -83,15 +83,17 @@
                  ELSE END_P ENDS EXISTS EXPLAIN
                  FALSE_P
                  IN IS
+                 KSHORTESTPATHS
                  LIMIT
                  MATCH MERGE
                  NOT NULL_P
                  OPERATOR OPTIONAL OR ORDER
                  REMOVE RETURN
-                 SET SKIP STARTS
+                 SET SHORTESTPATH SKIP STARTS
                  THEN TRUE_P
                  UNION UNWIND
                  VERBOSE
+                 WEIGHTEDSHORTESTPATH
                  WHEN WHERE WITH
                  XOR
                  YIELD
@@ -1933,6 +1935,56 @@ expr_func_subexpr:
 									  list_make1(makeString("count")), NIL, @1);
             $$ = (Node *)n;
 		}
+    | SHORTESTPATH '(' anonymous_path ')'
+        {
+            List *funcname;
+            List *args = NIL;
+            FuncCall *fc;
+            
+            /* Extract path components */
+            cypher_path *path = (cypher_path *)$3;
+            
+            /* Build function call to age_shortest_path_cypher */
+            funcname = list_make2(makeString("ag_catalog"), makeString("age_shortest_path_cypher"));
+            args = lappend(args, (Node *)path);
+            
+            fc = makeFuncCall(funcname, args, COERCE_EXPLICIT_CALL, @1);
+            $$ = (Node *)fc;
+        }
+    | KSHORTESTPATHS '(' anonymous_path ',' expr ')'
+        {
+            List *funcname;
+            List *args = NIL;
+            FuncCall *fc;
+            
+            /* Extract path components */
+            cypher_path *path = (cypher_path *)$3;
+            
+            /* Build function call to age_k_shortest_paths_cypher */
+            funcname = list_make2(makeString("ag_catalog"), makeString("age_k_shortest_paths_cypher"));
+            args = lappend(args, (Node *)path);
+            args = lappend(args, $5);  /* k parameter */
+            
+            fc = makeFuncCall(funcname, args, COERCE_EXPLICIT_CALL, @1);
+            $$ = (Node *)fc;
+        }
+    | WEIGHTEDSHORTESTPATH '(' anonymous_path ',' expr ')'
+        {
+            List *funcname;
+            List *args = NIL;
+            FuncCall *fc;
+            
+            /* Extract path components */
+            cypher_path *path = (cypher_path *)$3;
+            
+            /* Build function call to age_weighted_shortest_path_cypher */
+            funcname = list_make2(makeString("ag_catalog"), makeString("age_weighted_shortest_path_cypher"));
+            args = lappend(args, (Node *)path);
+            args = lappend(args, $5);  /* weight property parameter */
+            
+            fc = makeFuncCall(funcname, args, COERCE_EXPLICIT_CALL, @1);
+            $$ = (Node *)fc;
+        }
     ;
 
 expr_subquery:

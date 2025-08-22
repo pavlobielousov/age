@@ -28,4 +28,9 @@ Datum age_shortest_path(PG_FUNCTION_ARGS);
 Datum age_k_shortest_paths(PG_FUNCTION_ARGS);
 Datum age_weighted_shortest_path(PG_FUNCTION_ARGS);
 
+/* Function declarations for Cypher syntax support */
+Datum age_shortest_path_cypher(PG_FUNCTION_ARGS);
+Datum age_k_shortest_paths_cypher(PG_FUNCTION_ARGS);
+Datum age_weighted_shortest_path_cypher(PG_FUNCTION_ARGS);
+
 #endif /* AG_SHORTEST_PATH_H */

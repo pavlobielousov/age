@@ -410,3 +410,111 @@ Datum age_weighted_shortest_path(PG_FUNCTION_ARGS)
     /* For now, return the unweighted shortest path - can be extended to implement Dijkstra */
     return age_shortest_path(fcinfo);
 }
+
+/*
+ * Cypher syntax wrapper functions
+ */
+
+/*
+ * PostgreSQL function: age_shortest_path_cypher
+ * 
+ * Handles Cypher syntax: shortestPath((a)-[*1..6]-(b))
+ */
+PG_FUNCTION_INFO_V1(age_shortest_path_cypher);
+
+Datum age_shortest_path_cypher(PG_FUNCTION_ARGS)
+{
+    agtype *path_expr;
+    Name graph_name;
+    
+    /* For now, return a simple placeholder - this needs full path parsing implementation */
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+        
+    path_expr = AG_GET_ARG_AGTYPE_P(0);
+    
+    /* TODO: Parse path expression to extract:
+     * - start vertex pattern
+     * - end vertex pattern  
+     * - edge constraints
+     * - hop limits
+     * Then call the underlying shortest path algorithm
+     */
+    
+    /* Placeholder: return empty path array for now */
+    agtype_value agtv_result;
+    agtype_in_state result_state;
+    
+    MemSet(&result_state, 0, sizeof(agtype_in_state));
+    
+    push_agtype_value(&result_state, WAGT_BEGIN_ARRAY, NULL);
+    agtv_result = *push_agtype_value(&result_state, WAGT_END_ARRAY, NULL);
+    
+    PG_RETURN_POINTER(agtype_value_to_agtype(&agtv_result));
+}
+
+/*
+ * PostgreSQL function: age_k_shortest_paths_cypher
+ * 
+ * Handles Cypher syntax: kShortestPaths((a)-[*1..6]-(b), 5)
+ */
+PG_FUNCTION_INFO_V1(age_k_shortest_paths_cypher);
+
+Datum age_k_shortest_paths_cypher(PG_FUNCTION_ARGS)
+{
+    agtype *path_expr;
+    int32 k;
+    
+    /* For now, return a simple placeholder */
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+        PG_RETURN_NULL();
+        
+    path_expr = AG_GET_ARG_AGTYPE_P(0);
+    k = PG_GETARG_INT32(1);
+    
+    /* TODO: Parse path expression and implement k-shortest paths */
+    
+    /* Placeholder: return empty path array for now */
+    agtype_value agtv_result;
+    agtype_in_state result_state;
+    
+    MemSet(&result_state, 0, sizeof(agtype_in_state));
+    
+    push_agtype_value(&result_state, WAGT_BEGIN_ARRAY, NULL);
+    agtv_result = *push_agtype_value(&result_state, WAGT_END_ARRAY, NULL);
+    
+    PG_RETURN_POINTER(agtype_value_to_agtype(&agtv_result));
+}
+
+/*
+ * PostgreSQL function: age_weighted_shortest_path_cypher
+ * 
+ * Handles Cypher syntax: weightedShortestPath((a)-[e*1..6]-(b), e.cost)
+ */
+PG_FUNCTION_INFO_V1(age_weighted_shortest_path_cypher);
+
+Datum age_weighted_shortest_path_cypher(PG_FUNCTION_ARGS)
+{
+    agtype *path_expr;
+    agtype *weight_property;
+    
+    /* For now, return a simple placeholder */
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+        PG_RETURN_NULL();
+        
+    path_expr = AG_GET_ARG_AGTYPE_P(0);
+    weight_property = AG_GET_ARG_AGTYPE_P(1);
+    
+    /* TODO: Parse path expression and weight property, implement Dijkstra */
+    
+    /* Placeholder: return empty path array for now */
+    agtype_value agtv_result;
+    agtype_in_state result_state;
+    
+    MemSet(&result_state, 0, sizeof(agtype_in_state));
+    
+    push_agtype_value(&result_state, WAGT_BEGIN_ARRAY, NULL);
+    agtv_result = *push_agtype_value(&result_state, WAGT_END_ARRAY, NULL);
+    
+    PG_RETURN_POINTER(agtype_value_to_agtype(&agtv_result));
+}

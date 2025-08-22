@@ -74,3 +74,34 @@ CREATE FUNCTION ag_catalog.age_weighted_shortest_path(graph_name cstring, start_
 RETURNS NULL ON NULL INPUT
 PARALLEL SAFE
 AS 'MODULE_PATHNAME';
+
+--
+-- Cypher syntax support functions
+--
+
+-- Single shortest path from Cypher syntax: shortestPath((a)-[*1..6]-(b))
+CREATE FUNCTION ag_catalog.age_shortest_path_cypher(path_expr agtype)
+    RETURNS agtype
+    LANGUAGE c
+    IMMUTABLE
+RETURNS NULL ON NULL INPUT
+PARALLEL SAFE
+AS 'MODULE_PATHNAME';
+
+-- K shortest paths from Cypher syntax: kShortestPaths((a)-[*1..6]-(b), 5)
+CREATE FUNCTION ag_catalog.age_k_shortest_paths_cypher(path_expr agtype, k int4)
+    RETURNS agtype
+    LANGUAGE c
+    IMMUTABLE
+RETURNS NULL ON NULL INPUT
+PARALLEL SAFE
+AS 'MODULE_PATHNAME';
+
+-- Weighted shortest path from Cypher syntax: weightedShortestPath((a)-[e*1..6]-(b), e.cost)
+CREATE FUNCTION ag_catalog.age_weighted_shortest_path_cypher(path_expr agtype, weight_property agtype)
+    RETURNS agtype
+    LANGUAGE c
+    IMMUTABLE
+RETURNS NULL ON NULL INPUT
+PARALLEL SAFE
+AS 'MODULE_PATHNAME';
