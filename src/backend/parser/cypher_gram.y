@@ -1345,6 +1345,54 @@ anonymous_path:
 
             $$ = (Node *)n;
         }
+    | SHORTESTPATH '(' anonymous_path ')'
+        {
+            /* For now, return the path directly - the transformation 
+             * will be handled in the transform phase */
+            cypher_path *n;
+            cypher_path *inner_path = (cypher_path *)$3;
+
+            n = make_ag_node(cypher_path);
+            n->path = inner_path->path;
+            n->var_name = NULL;
+            n->parsed_var_name = NULL;
+            n->location = @1;
+            
+            /* Mark this as a shortest path for later processing */
+            /* We'll need to handle this in the transform phase */
+
+            $$ = (Node *)n;
+        }
+    | KSHORTESTPATHS '(' anonymous_path ',' expr ')'
+        {
+            /* For now, return the path directly - the transformation 
+             * will be handled in the transform phase */
+            cypher_path *n;
+            cypher_path *inner_path = (cypher_path *)$3;
+
+            n = make_ag_node(cypher_path);
+            n->path = inner_path->path;
+            n->var_name = NULL;
+            n->parsed_var_name = NULL;
+            n->location = @1;
+
+            $$ = (Node *)n;
+        }
+    | WEIGHTEDSHORTESTPATH '(' anonymous_path ',' expr ')'
+        {
+            /* For now, return the path directly - the transformation 
+             * will be handled in the transform phase */
+            cypher_path *n;
+            cypher_path *inner_path = (cypher_path *)$3;
+
+            n = make_ag_node(cypher_path);
+            n->path = inner_path->path;
+            n->var_name = NULL;
+            n->parsed_var_name = NULL;
+            n->location = @1;
+
+            $$ = (Node *)n;
+        }
     ;
 
 simple_path_opt_parens:
@@ -1935,56 +1983,6 @@ expr_func_subexpr:
 									  list_make1(makeString("count")), NIL, @1);
             $$ = (Node *)n;
 		}
-    | SHORTESTPATH '(' anonymous_path ')'
-        {
-            List *funcname;
-            List *args = NIL;
-            FuncCall *fc;
-            
-            /* Extract path components */
-            cypher_path *path = (cypher_path *)$3;
-            
-            /* Build function call to age_shortest_path_cypher */
-            funcname = list_make2(makeString("ag_catalog"), makeString("age_shortest_path_cypher"));
-            args = lappend(args, (Node *)path);
-            
-            fc = makeFuncCall(funcname, args, COERCE_EXPLICIT_CALL, @1);
-            $$ = (Node *)fc;
-        }
-    | KSHORTESTPATHS '(' anonymous_path ',' expr ')'
-        {
-            List *funcname;
-            List *args = NIL;
-            FuncCall *fc;
-            
-            /* Extract path components */
-            cypher_path *path = (cypher_path *)$3;
-            
-            /* Build function call to age_k_shortest_paths_cypher */
-            funcname = list_make2(makeString("ag_catalog"), makeString("age_k_shortest_paths_cypher"));
-            args = lappend(args, (Node *)path);
-            args = lappend(args, $5);  /* k parameter */
-            
-            fc = makeFuncCall(funcname, args, COERCE_EXPLICIT_CALL, @1);
-            $$ = (Node *)fc;
-        }
-    | WEIGHTEDSHORTESTPATH '(' anonymous_path ',' expr ')'
-        {
-            List *funcname;
-            List *args = NIL;
-            FuncCall *fc;
-            
-            /* Extract path components */
-            cypher_path *path = (cypher_path *)$3;
-            
-            /* Build function call to age_weighted_shortest_path_cypher */
-            funcname = list_make2(makeString("ag_catalog"), makeString("age_weighted_shortest_path_cypher"));
-            args = lappend(args, (Node *)path);
-            args = lappend(args, $5);  /* weight property parameter */
-            
-            fc = makeFuncCall(funcname, args, COERCE_EXPLICIT_CALL, @1);
-            $$ = (Node *)fc;
-        }
     ;
 
 expr_subquery:
