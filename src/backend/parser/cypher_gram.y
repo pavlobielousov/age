@@ -1342,13 +1342,16 @@ anonymous_path:
             n->var_name = NULL;
             n->parsed_var_name = NULL;
             n->location = @1;
+            
+            /* Initialize shortest path fields for regular paths */
+            n->path_type = CYPHER_PATH_NORMAL;
+            n->k_value = 0;
+            n->weight_expr = NULL;
 
             $$ = (Node *)n;
         }
     | SHORTESTPATH '(' anonymous_path ')'
         {
-            /* For now, return the path directly - the transformation 
-             * will be handled in the transform phase */
             cypher_path *n;
             cypher_path *inner_path = (cypher_path *)$3;
 
@@ -1358,15 +1361,15 @@ anonymous_path:
             n->parsed_var_name = NULL;
             n->location = @1;
             
-            /* Mark this as a shortest path for later processing */
-            /* We'll need to handle this in the transform phase */
+            /* Mark this as a shortest path */
+            n->path_type = CYPHER_PATH_SHORTEST;
+            n->k_value = 1;
+            n->weight_expr = NULL;
 
             $$ = (Node *)n;
         }
     | KSHORTESTPATHS '(' anonymous_path ',' expr ')'
         {
-            /* For now, return the path directly - the transformation 
-             * will be handled in the transform phase */
             cypher_path *n;
             cypher_path *inner_path = (cypher_path *)$3;
 
@@ -1375,13 +1378,16 @@ anonymous_path:
             n->var_name = NULL;
             n->parsed_var_name = NULL;
             n->location = @1;
+
+            /* Mark this as k-shortest paths */
+            n->path_type = CYPHER_PATH_K_SHORTEST;
+            n->k_value = 0; /* Will be extracted from expr later */
+            n->weight_expr = $5; /* Store the k parameter */
 
             $$ = (Node *)n;
         }
     | WEIGHTEDSHORTESTPATH '(' anonymous_path ',' expr ')'
         {
-            /* For now, return the path directly - the transformation 
-             * will be handled in the transform phase */
             cypher_path *n;
             cypher_path *inner_path = (cypher_path *)$3;
 
@@ -1390,6 +1396,11 @@ anonymous_path:
             n->var_name = NULL;
             n->parsed_var_name = NULL;
             n->location = @1;
+
+            /* Mark this as weighted shortest path */
+            n->path_type = CYPHER_PATH_WEIGHTED_SHORTEST;
+            n->k_value = 1;
+            n->weight_expr = $5; /* Store the weight expression */
 
             $$ = (Node *)n;
         }

@@ -4083,6 +4083,108 @@ static Node *create_property_constraints(cypher_parsestate *cpstate,
     }
 }
 
+static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
+                                      cypher_path *path);
+
+/*
+ * Transform a shortest path pattern into appropriate function calls
+ * This function handles shortestPath(), kShortestPaths(), and weightedShortestPath()
+ */
+static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
+                                      cypher_path *path)
+{
+    ParseState *pstate = (ParseState *)cpstate;
+    List *funcargs = NIL;
+    FuncCall *func_call;
+    List *path_entities;
+    List *start_quals = NIL;
+    List *end_quals = NIL;
+    cypher_node *start_node, *end_node;
+    cypher_relationship *edge = NULL;
+    const char *func_name;
+    
+    /* Extract start and end nodes from the path */
+    if (list_length(path->path) < 3)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("shortest path requires at least start-edge-end pattern")));
+    }
+    
+    start_node = (cypher_node *)linitial(path->path);
+    end_node = (cypher_node *)llast(path->path);
+    
+    /* Find the edge in the path (should be the middle element for simple cases) */
+    if (list_length(path->path) == 3)
+    {
+        edge = (cypher_relationship *)lsecond(path->path);
+    }
+    
+    /* Determine which shortest path function to call */
+    switch (path->path_type)
+    {
+        case CYPHER_PATH_SHORTEST:
+            func_name = "age_shortest_path_match";
+            break;
+        case CYPHER_PATH_K_SHORTEST:
+            func_name = "age_k_shortest_paths_match";
+            break;
+        case CYPHER_PATH_WEIGHTED_SHORTEST:
+            func_name = "age_weighted_shortest_path_match";
+            break;
+        default:
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("unsupported shortest path type")));
+    }
+    
+    /* For now, return empty quals and create a placeholder path variable */
+    /* This is a simplified implementation - a full implementation would */
+    /* need to integrate with AGE's query planning and execution */
+    
+    /* Create the path variable if needed */
+    if (path->var_name != NULL)
+    {
+        TargetEntry *path_te;
+        Expr *shortest_path_expr;
+        
+        if (findTarget(query->targetList, path->var_name) != NULL)
+        {
+            ereport(ERROR,
+                    (errcode(ERRCODE_DUPLICATE_ALIAS),
+                     errmsg("variable \"%s\" already exists",
+                            path->var_name),
+                     parser_errposition(pstate, path->location)));
+        }
+
+        /* Create a function call expression for the shortest path */
+        func_call = makeNode(FuncCall);
+        func_call->funcname = list_make1(makeString((char *)func_name));
+        func_call->args = funcargs;
+        func_call->agg_order = NIL;
+        func_call->agg_filter = NULL;
+        func_call->agg_within_group = false;
+        func_call->agg_star = false;
+        func_call->agg_distinct = false;
+        func_call->func_variadic = false;
+        func_call->over = NULL;
+        func_call->location = path->location;
+
+        shortest_path_expr = (Expr *)transformExpr(pstate, (Node *)func_call, EXPR_KIND_SELECT_TARGET);
+
+        path_te = makeTargetEntry(shortest_path_expr,
+                                  list_length(query->targetList) + 1,
+                                  pstrdup(path->var_name),
+                                  false);
+
+        query->targetList = lappend(query->targetList, path_te);
+    }
+    
+    /* Return empty qualifiers for now - in a full implementation, this would */
+    /* return appropriate constraints for the shortest path algorithm */
+    return NIL;
+}
+
 /*
  * For the given path, transform each entity within the path, create
  * the path variable if needed, and construct the quals to enforce the
@@ -4096,6 +4198,13 @@ static List *transform_match_path(cypher_parsestate *cpstate, Query *query,
     List *entities = NIL;
     FuncCall *duplicate_edge_qual;
     List *join_quals;
+
+    /* Check if this is a shortest path pattern */
+    if (path->path_type != CYPHER_PATH_NORMAL)
+    {
+        /* Handle shortest path algorithms */
+        return transform_shortest_path(cpstate, query, path);
+    }
 
     /* transform the entities in the path */
     entities = transform_match_entities(cpstate, query, path);
@@ -4274,6 +4383,12 @@ static transform_entity *transform_VLE_edge_entity(cypher_parsestate *cpstate,
 static bool isa_special_VLE_case(cypher_path *path)
 {
     cypher_relationship *cr = NULL;
+
+    /* Check for shortest path patterns */
+    if (path->path_type != CYPHER_PATH_NORMAL)
+    {
+        return true;
+    }
 
     if (path->var_name == NULL)
     {
