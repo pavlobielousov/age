@@ -4089,75 +4089,80 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
 /*
  * Transform a shortest path pattern into appropriate function calls
  * This function handles shortestPath(), kShortestPaths(), and weightedShortestPath()
+ * No longer falls back to VLE - implements direct algorithm calls
  */
 static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
                                       cypher_path *path)
 {
-    /* For now, implement shortest path by falling back to regular VLE processing */
-    /* and adding a post-processing step in the execution phase */
+    ParseState *pstate = (ParseState *)cpstate;
+    List *function_call_list = NIL;
+    FuncCall *funcall;
     
     elog(NOTICE, "transform_shortest_path: called with path_type %d", path->path_type);
     
-    /* Mark the path as needing shortest path processing but continue with regular transformation */
-    /* The shortest path filtering will happen in the execution layer */
+    /* Extract start and end vertices from the path */
+    /* For now, we assume a simple path pattern like (a)-[*1..6]-(b) */
+    /* TODO: Extract actual vertex variables and constraints from path->path */
     
-    /* Transform the path using the regular VLE mechanism */
-    cypher_path *temp_path = make_ag_node(cypher_path);
-    temp_path->path = path->path;
-    temp_path->var_name = path->var_name;
-    temp_path->parsed_var_name = path->parsed_var_name;
-    temp_path->location = path->location;
-    temp_path->path_type = CYPHER_PATH_NORMAL; /* Use normal VLE for now */
-    temp_path->k_value = 0;
-    temp_path->weight_expr = NULL;
-    
-    /* Store the original shortest path information for later use */
-    /* TODO: This information needs to be passed to the execution layer somehow */
-    
-    elog(NOTICE, "transform_shortest_path: delegating to regular VLE processing");
-    
-    /* Call the original transform_match_path logic but with modified path */
-    ParseState *pstate = (ParseState *)cpstate;
-    List *qual = NIL;
-    List *entities = NIL;
-    FuncCall *duplicate_edge_qual;
-    List *join_quals;
-
-    /* transform the entities in the path */
-    entities = transform_match_entities(cpstate, query, temp_path);
-
-    /* create the path variable, if needed. */
-    if (temp_path->var_name != NULL)
+    /* Create function call based on path type */
+    switch (path->path_type)
     {
-        TargetEntry *path_te;
-
-        if (findTarget(query->targetList, temp_path->var_name) != NULL)
+        case CYPHER_PATH_SHORTEST:
         {
-            ereport(ERROR,
-                    (errcode(ERRCODE_DUPLICATE_ALIAS),
-                     errmsg("variable \"%s\" already exists",
-                            temp_path->var_name),
-                     parser_errposition(pstate, temp_path->location)));
+            /* Call age_shortest_path_cypher function */
+            funcall = makeFuncCall(list_make1(makeString("age_shortest_path_cypher")),
+                                  NIL, COERCE_EXPLICIT_CALL, -1);
+            
+            elog(NOTICE, "transform_shortest_path: creating shortestPath function call");
+            break;
         }
-
-        path_te = transform_match_create_path_variable(cpstate, temp_path,
-                                                       entities);
-        query->targetList = lappend(query->targetList, path_te);
+        
+        case CYPHER_PATH_K_SHORTEST:
+        {
+            /* Call age_k_shortest_paths_cypher function */
+            funcall = makeFuncCall(list_make1(makeString("age_k_shortest_paths_cypher")),
+                                  NIL, COERCE_EXPLICIT_CALL, -1);
+            
+            elog(NOTICE, "transform_shortest_path: creating kShortestPaths function call");
+            break;
+        }
+        
+        case CYPHER_PATH_WEIGHTED_SHORTEST:
+        {
+            /* Call age_weighted_shortest_path_cypher function */
+            funcall = makeFuncCall(list_make1(makeString("age_weighted_shortest_path_cypher")),
+                                  NIL, COERCE_EXPLICIT_CALL, -1);
+            
+            elog(NOTICE, "transform_shortest_path: creating weightedShortestPath function call");
+            break;
+        }
+        
+        default:
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                           errmsg("unsupported shortest path type: %d", path->path_type)));
     }
-
-    /* construct the quals for the join tree */
-    join_quals = make_path_join_quals(cpstate, entities);
-    qual = list_concat(qual, join_quals);
-
-    /* construct the qual to prevent duplicate edges */
-    if (list_length(entities) > 3)
+    
+    /* Transform function call to expression */
+    Node *function_expr = transformExpr(pstate, (Node *)funcall, EXPR_KIND_SELECT_TARGET);
+    
+    /* Add to target list if path has a variable name */
+    if (path->var_name != NULL)
     {
-        duplicate_edge_qual = prevent_duplicate_edges(cpstate, entities);
-        qual = lappend(qual, duplicate_edge_qual);
+        TargetEntry *te;
+        
+        te = makeTargetEntry((Expr *)function_expr,
+                           list_length(query->targetList) + 1,
+                           pstrdup(path->var_name),
+                           false);
+        
+        query->targetList = lappend(query->targetList, te);
     }
-
-    elog(NOTICE, "transform_shortest_path: returning quals from regular VLE processing");
-    return qual;
+    
+    elog(NOTICE, "transform_shortest_path: created function call for shortest path algorithm");
+    
+    /* Return the function call list */
+    function_call_list = lappend(function_call_list, function_expr);
+    return function_call_list;
 }
 
 /*
