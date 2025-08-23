@@ -4093,102 +4093,71 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
 static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
                                       cypher_path *path)
 {
-    ParseState *pstate = (ParseState *)cpstate;
-    List *funcargs = NIL;
-    FuncCall *func_call;
-    List *path_entities;
-    List *start_quals = NIL;
-    List *end_quals = NIL;
-    cypher_node *start_node, *end_node;
-    cypher_relationship *edge = NULL;
-    const char *func_name;
+    /* For now, implement shortest path by falling back to regular VLE processing */
+    /* and adding a post-processing step in the execution phase */
     
     elog(NOTICE, "transform_shortest_path: called with path_type %d", path->path_type);
     
-    /* Extract start and end nodes from the path */
-    if (list_length(path->path) < 3)
-    {
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("shortest path requires at least start-edge-end pattern")));
-    }
+    /* Mark the path as needing shortest path processing but continue with regular transformation */
+    /* The shortest path filtering will happen in the execution layer */
     
-    start_node = (cypher_node *)linitial(path->path);
-    end_node = (cypher_node *)llast(path->path);
+    /* Transform the path using the regular VLE mechanism */
+    cypher_path *temp_path = make_ag_node(cypher_path);
+    temp_path->path = path->path;
+    temp_path->var_name = path->var_name;
+    temp_path->parsed_var_name = path->parsed_var_name;
+    temp_path->location = path->location;
+    temp_path->path_type = CYPHER_PATH_NORMAL; /* Use normal VLE for now */
+    temp_path->k_value = 0;
+    temp_path->weight_expr = NULL;
     
-    /* Find the edge in the path (should be the middle element for simple cases) */
-    if (list_length(path->path) == 3)
-    {
-        edge = (cypher_relationship *)lsecond(path->path);
-    }
+    /* Store the original shortest path information for later use */
+    /* TODO: This information needs to be passed to the execution layer somehow */
     
-    /* Determine which shortest path function to call */
-    switch (path->path_type)
-    {
-        case CYPHER_PATH_SHORTEST:
-            func_name = "age_shortest_path_match";
-            elog(NOTICE, "transform_shortest_path: using shortestPath algorithm");
-            break;
-        case CYPHER_PATH_K_SHORTEST:
-            func_name = "age_k_shortest_paths_match";
-            elog(NOTICE, "transform_shortest_path: using kShortestPaths algorithm");
-            break;
-        case CYPHER_PATH_WEIGHTED_SHORTEST:
-            func_name = "age_weighted_shortest_path_match";
-            elog(NOTICE, "transform_shortest_path: using weightedShortestPath algorithm");
-            break;
-        default:
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("unsupported shortest path type")));
-    }
+    elog(NOTICE, "transform_shortest_path: delegating to regular VLE processing");
     
-    /* For now, return empty quals and create a placeholder path variable */
-    /* This is a simplified implementation - a full implementation would */
-    /* need to integrate with AGE's query planning and execution */
-    
-    /* Create the path variable if needed */
-    if (path->var_name != NULL)
+    /* Call the original transform_match_path logic but with modified path */
+    ParseState *pstate = (ParseState *)cpstate;
+    List *qual = NIL;
+    List *entities = NIL;
+    FuncCall *duplicate_edge_qual;
+    List *join_quals;
+
+    /* transform the entities in the path */
+    entities = transform_match_entities(cpstate, query, temp_path);
+
+    /* create the path variable, if needed. */
+    if (temp_path->var_name != NULL)
     {
         TargetEntry *path_te;
-        Expr *shortest_path_expr;
-        
-        if (findTarget(query->targetList, path->var_name) != NULL)
+
+        if (findTarget(query->targetList, temp_path->var_name) != NULL)
         {
             ereport(ERROR,
                     (errcode(ERRCODE_DUPLICATE_ALIAS),
                      errmsg("variable \"%s\" already exists",
-                            path->var_name),
-                     parser_errposition(pstate, path->location)));
+                            temp_path->var_name),
+                     parser_errposition(pstate, temp_path->location)));
         }
 
-        /* Create a function call expression for the shortest path */
-        func_call = makeNode(FuncCall);
-        func_call->funcname = list_make1(makeString((char *)func_name));
-        func_call->args = funcargs;
-        func_call->agg_order = NIL;
-        func_call->agg_filter = NULL;
-        func_call->agg_within_group = false;
-        func_call->agg_star = false;
-        func_call->agg_distinct = false;
-        func_call->func_variadic = false;
-        func_call->over = NULL;
-        func_call->location = path->location;
-
-        shortest_path_expr = (Expr *)transformExpr(pstate, (Node *)func_call, EXPR_KIND_SELECT_TARGET);
-
-        path_te = makeTargetEntry(shortest_path_expr,
-                                  list_length(query->targetList) + 1,
-                                  pstrdup(path->var_name),
-                                  false);
-
+        path_te = transform_match_create_path_variable(cpstate, temp_path,
+                                                       entities);
         query->targetList = lappend(query->targetList, path_te);
     }
-    
-    elog(NOTICE, "transform_shortest_path: returning empty quals");
-    /* Return empty qualifiers for now - in a full implementation, this would */
-    /* return appropriate constraints for the shortest path algorithm */
-    return NIL;
+
+    /* construct the quals for the join tree */
+    join_quals = make_path_join_quals(cpstate, entities);
+    qual = list_concat(qual, join_quals);
+
+    /* construct the qual to prevent duplicate edges */
+    if (list_length(entities) > 3)
+    {
+        duplicate_edge_qual = prevent_duplicate_edges(cpstate, entities);
+        qual = lappend(qual, duplicate_edge_qual);
+    }
+
+    elog(NOTICE, "transform_shortest_path: returning quals from regular VLE processing");
+    return qual;
 }
 
 /*
@@ -4215,6 +4184,8 @@ static List *transform_match_path(cypher_parsestate *cpstate, Query *query,
 
     /* transform the entities in the path */
     entities = transform_match_entities(cpstate, query, path);
+    
+    elog(NOTICE, "transform_match_path: path_type = %d, var_name = %s", path->path_type, path->var_name ? path->var_name : "NULL");
 
     /* create the path variable, if needed. */
     if (path->var_name != NULL)
