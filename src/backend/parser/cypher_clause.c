@@ -4103,6 +4103,8 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
     cypher_relationship *edge = NULL;
     const char *func_name;
     
+    elog(NOTICE, "transform_shortest_path: called with path_type %d", path->path_type);
+    
     /* Extract start and end nodes from the path */
     if (list_length(path->path) < 3)
     {
@@ -4125,12 +4127,15 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
     {
         case CYPHER_PATH_SHORTEST:
             func_name = "age_shortest_path_match";
+            elog(NOTICE, "transform_shortest_path: using shortestPath algorithm");
             break;
         case CYPHER_PATH_K_SHORTEST:
             func_name = "age_k_shortest_paths_match";
+            elog(NOTICE, "transform_shortest_path: using kShortestPaths algorithm");
             break;
         case CYPHER_PATH_WEIGHTED_SHORTEST:
             func_name = "age_weighted_shortest_path_match";
+            elog(NOTICE, "transform_shortest_path: using weightedShortestPath algorithm");
             break;
         default:
             ereport(ERROR,
@@ -4180,6 +4185,7 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
         query->targetList = lappend(query->targetList, path_te);
     }
     
+    elog(NOTICE, "transform_shortest_path: returning empty quals");
     /* Return empty qualifiers for now - in a full implementation, this would */
     /* return appropriate constraints for the shortest path algorithm */
     return NIL;
@@ -4202,6 +4208,7 @@ static List *transform_match_path(cypher_parsestate *cpstate, Query *query,
     /* Check if this is a shortest path pattern */
     if (path->path_type != CYPHER_PATH_NORMAL)
     {
+        elog(NOTICE, "transform_match_path: detected shortest path pattern type %d", path->path_type);
         /* Handle shortest path algorithms */
         return transform_shortest_path(cpstate, query, path);
     }

@@ -1348,6 +1348,9 @@ anonymous_path:
             n->k_value = 0;
             n->weight_expr = NULL;
 
+            /* Debug output */
+            elog(NOTICE, "Grammar: regular path pattern detected");
+
             $$ = (Node *)n;
         }
     | SHORTESTPATH '(' anonymous_path ')'
@@ -1365,6 +1368,9 @@ anonymous_path:
             n->path_type = CYPHER_PATH_SHORTEST;
             n->k_value = 1;
             n->weight_expr = NULL;
+
+            /* Debug output */
+            elog(NOTICE, "Grammar: shortestPath pattern detected");
 
             $$ = (Node *)n;
         }
