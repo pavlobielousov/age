@@ -53,6 +53,13 @@ typedef struct ShortestPath
     int hops;       /* Number of hops */
 } ShortestPath;
 
+/* Neighbor information for weighted algorithms */
+typedef struct NeighborInfo
+{
+    graphid vertex_id;  /* Neighbor vertex ID */
+    graphid edge_id;    /* Edge connecting to this neighbor */
+} NeighborInfo;
+
 /* Queue node for bidirectional BFS */
 typedef struct BidirBFS_node
 {
@@ -128,6 +135,9 @@ static BidirBFS_node *dequeue_bidir(BidirBFS_queue *queue);
 static void free_bidir_queue(BidirBFS_queue *queue);
 static List *get_filtered_neighbors(GRAPH_global_context *ggctx, graphid vertex_id,
                                    NeighborFilter *filter, bool outgoing);
+static List *get_neighbors_with_edges(GRAPH_global_context *ggctx, graphid vertex_id,
+                                    NeighborFilter *filter, bool outgoing, 
+                                    HTAB *removed_edges, HTAB *removed_vertices);
 static bool check_vertex_constraints(GRAPH_global_context *ggctx, graphid vertex_id,
                                     NeighborFilter *filter);
 static bool check_edge_constraints(GRAPH_global_context *ggctx, graphid edge_id,
@@ -301,16 +311,64 @@ static double get_edge_weight(GRAPH_global_context *ggctx, graphid edge_id,
                              char *weight_property)
 {
     edge_entry *ee;
+    agtype *properties_agt;
+    agtype_value *properties_agtv;
+    double weight = 1.0; /* Default weight */
+    int i;
     
-    (void) weight_property; /* Avoid unused variable warning for now */
+    if (weight_property == NULL)
+        return weight;
     
     ee = get_edge_entry(ggctx, edge_id);
     if (ee == NULL)
-        return 1.0; /* Default weight */
+        return weight;
     
-    /* TODO: Extract weight from edge properties when property access is available */
-    /* For now, return default weight of 1.0 */
-    return 1.0;
+    properties_agt = (agtype *)DatumGetPointer(get_edge_entry_properties(ee));
+    if (properties_agt == NULL)
+        return weight;
+    
+    properties_agtv = get_ith_agtype_value_from_container(&properties_agt->root, 0);
+    if (properties_agtv == NULL || properties_agtv->type != AGTV_OBJECT)
+        return weight;
+    
+    /* Search for the weight property in the object */
+    for (i = 0; i < properties_agtv->val.object.num_pairs; i++)
+    {
+        agtype_value *key = &properties_agtv->val.object.pairs[i].key;
+        agtype_value *value = &properties_agtv->val.object.pairs[i].value;
+        
+        char *key_val = key->val.string.val;
+        int key_len = key->val.string.len;
+        int weight_prop_len = strlen(weight_property);
+        
+        Assert(key->type == AGTV_STRING);
+        
+        /* Check if this is the weight property */
+        if (key_len == weight_prop_len &&
+            pg_strncasecmp(key_val, weight_property, key_len) == 0)
+        {
+            /* Extract numeric weight value */
+            if (value->type == AGTV_INTEGER)
+            {
+                weight = (double)value->val.int_value;
+                break;
+            }
+            else if (value->type == AGTV_FLOAT)
+            {
+                weight = value->val.float_value;
+                break;
+            }
+            else if (value->type == AGTV_NUMERIC)
+            {
+                /* Convert numeric to double */
+                weight = DatumGetFloat8(DirectFunctionCall1(numeric_float8,
+                                                           value->val.numeric));
+                break;
+            }
+        }
+    }
+    
+    return weight;
 }
 
 /*
@@ -543,6 +601,92 @@ static List *get_filtered_neighbors_with_removed(GRAPH_global_context *ggctx,
     
     return neighbors;
 }
+
+/*
+ * Get neighbors with edge information for weighted algorithms
+ * Returns a list of NeighborInfo structures containing both vertex and edge IDs
+ */
+static List *get_neighbors_with_edges(GRAPH_global_context *ggctx, graphid vertex_id,
+                                    NeighborFilter *filter, bool outgoing, 
+                                    HTAB *removed_edges, HTAB *removed_vertices)
+{
+    List *neighbors = NIL;
+    vertex_entry *ve;
+    ListGraphId *edges;
+    GraphIdNode *node;
+    bool found;
+    
+    ve = get_vertex_entry(ggctx, vertex_id);
+    if (ve == NULL)
+        return NIL;
+    
+    /* Get appropriate edge list based on direction */
+    if (outgoing)
+        edges = get_vertex_entry_edges_out(ve);
+    else
+        edges = get_vertex_entry_edges_in(ve);
+    
+    if (edges == NULL)
+        return NIL;
+    
+    /* Iterate through edges and apply constraints */
+    node = get_list_head(edges);
+    while (node != NULL)
+    {
+        graphid edge_id = get_graphid(node);
+        edge_entry *ee = get_edge_entry(ggctx, edge_id);
+        
+        if (ee != NULL)
+        {
+            /* Check if edge is in removed set */
+            if (removed_edges != NULL)
+            {
+                hash_search(removed_edges, &edge_id, HASH_FIND, &found);
+                if (found)
+                {
+                    node = next_GraphIdNode(node);
+                    continue;
+                }
+            }
+            
+            /* Apply edge constraints early */
+            if (check_edge_constraints(ggctx, edge_id, filter))
+            {
+                graphid neighbor_id;
+                
+                /* Get the appropriate neighbor vertex */
+                if (outgoing)
+                    neighbor_id = get_edge_entry_end_vertex_id(ee);
+                else
+                    neighbor_id = get_edge_entry_start_vertex_id(ee);
+                
+                /* Check if vertex is in removed set */
+                if (removed_vertices != NULL)
+                {
+                    hash_search(removed_vertices, &neighbor_id, HASH_FIND, &found);
+                    if (found)
+                    {
+                        node = next_GraphIdNode(node);
+                        continue;
+                    }
+                }
+                
+                /* Apply vertex constraints early */
+                if (check_vertex_constraints(ggctx, neighbor_id, filter))
+                {
+                    NeighborInfo *neighbor_info = palloc(sizeof(NeighborInfo));
+                    neighbor_info->vertex_id = neighbor_id;
+                    neighbor_info->edge_id = edge_id;
+                    neighbors = lappend(neighbors, neighbor_info);
+                }
+            }
+        }
+        node = next_GraphIdNode(node);
+    }
+    
+    return neighbors;
+}
+
 static bool check_vertex_constraints(GRAPH_global_context *ggctx, graphid vertex_id,
                                     NeighborFilter *filter)
 {
@@ -989,14 +1133,16 @@ static ShortestPath *dijkstra_shortest_path(GRAPH_global_context *ggctx,
         }
         
         /* Explore neighbors */
-        List *neighbors = get_filtered_neighbors_with_removed(ggctx, current->vertex_id, 
-                                                            filter, true, removed_edges, 
-                                                            removed_vertices);
+        List *neighbors = get_neighbors_with_edges(ggctx, current->vertex_id, 
+                                                  filter, true, removed_edges, 
+                                                  removed_vertices);
         
         foreach(lc, neighbors)
         {
-            graphid neighbor_id = lfirst_oid(lc);
-            double edge_weight = get_edge_weight(ggctx, 0, weight_property); /* TODO: Get actual edge ID */
+            NeighborInfo *neighbor_info = (NeighborInfo *)lfirst(lc);
+            graphid neighbor_id = neighbor_info->vertex_id;
+            graphid edge_id = neighbor_info->edge_id;
+            double edge_weight = get_edge_weight(ggctx, edge_id, weight_property);
             double new_distance = current->distance + edge_weight;
             Dijkstra_node *neighbor_entry;
             
@@ -1576,9 +1722,9 @@ Datum age_weighted_shortest_path(PG_FUNCTION_ARGS)
     filter = create_neighbor_filter();
     filter->max_hops = max_hops;
     
-    /* For now, fall back to unweighted shortest path */
-    /* TODO: Implement full Dijkstra's algorithm with weight property extraction */
-    shortest_path = bidirectional_bfs(ggctx, start_vertex_id, end_vertex_id, filter);
+    /* Use Dijkstra's algorithm for weighted shortest path */
+    shortest_path = dijkstra_shortest_path(ggctx, start_vertex_id, end_vertex_id, 
+                                         weight_property, filter, NULL, NULL);
     
     if (shortest_path == NULL)
     {
@@ -1727,38 +1873,90 @@ PG_FUNCTION_INFO_V1(age_weighted_shortest_path_cypher);
 
 Datum age_weighted_shortest_path_cypher(PG_FUNCTION_ARGS)
 {
-    /* For now, return shortest path (unweighted) as proof of concept */
-    /* TODO: Parse path expression and weight property, implement Dijkstra */
-    
-    agtype_parse_state *state = NULL;
+    char *graph_name;
+    agtype *start_vertex_agt;
+    agtype *end_vertex_agt;
+    char *weight_property = "weight"; /* default weight property */
+    int32 max_hops = 10; /* default max hops */
+    Oid graph_oid;
+    graphid start_vertex_id;
+    graphid end_vertex_id;
+    GRAPH_global_context *ggctx;
+    agtype_value *start_agtv;
+    agtype_value *end_agtv;
     agtype_value *agtv_result;
+    agtype_parse_state *state = NULL;
+    NeighborFilter *filter;
+    ShortestPath *shortest_path;
     
-    /* Create demo weighted shortest path result */
-    agtv_result = push_agtype_value(&state, WAGT_BEGIN_ARRAY, NULL);
+    /* Check for null arguments */
+    if (PG_ARGISNULL(0) || PG_ARGISNULL(1) || PG_ARGISNULL(2))
+        PG_RETURN_NULL();
     
-    /* Add demo shortest path vertices */
+    /* Get arguments */
+    graph_name = PG_GETARG_CSTRING(0);
+    start_vertex_agt = AG_GET_ARG_AGTYPE_P(1);
+    end_vertex_agt = AG_GET_ARG_AGTYPE_P(2);
+    
+    if (!PG_ARGISNULL(3))
+        weight_property = PG_GETARG_CSTRING(3);
+    if (!PG_ARGISNULL(4))
+        max_hops = PG_GETARG_INT32(4);
+    
+    /* Get graph OID */
+    graph_oid = get_graph_oid(graph_name);
+    if (!OidIsValid(graph_oid))
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("graph \"%s\" does not exist", graph_name)));
+    
+    /* Get graph context */
+    ggctx = manage_GRAPH_global_contexts(graph_name, graph_oid);
+    if (ggctx == NULL)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("failed to get graph context for \"%s\"", graph_name)));
+    
+    /* Extract vertex IDs from agtype */
+    start_agtv = get_ith_agtype_value_from_container(&start_vertex_agt->root, 0);
+    end_agtv = get_ith_agtype_value_from_container(&end_vertex_agt->root, 0);
+    
+    if (start_agtv->type != AGTV_INTEGER || end_agtv->type != AGTV_INTEGER)
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("vertex arguments must be integers")));
+    
+    start_vertex_id = start_agtv->val.int_value;
+    end_vertex_id = end_agtv->val.int_value;
+    
+    /* Create neighbor filter with constraints */
+    filter = create_neighbor_filter();
+    filter->max_hops = max_hops;
+    
+    /* Use Dijkstra's algorithm for weighted shortest path */
+    shortest_path = dijkstra_shortest_path(ggctx, start_vertex_id, end_vertex_id, 
+                                         weight_property, filter, NULL, NULL);
+    
+    if (shortest_path == NULL)
     {
-        agtype_value agtv_vertex;
-        agtv_vertex.type = AGTV_INTEGER;
-        agtv_vertex.val.int_value = 1;  /* Start vertex */
-        agtv_result = push_agtype_value(&state, WAGT_ELEM, &agtv_vertex);
+        /* No path found - return empty array */
+        agtv_result = push_agtype_value(&state, WAGT_BEGIN_ARRAY, NULL);
+        agtv_result = push_agtype_value(&state, WAGT_END_ARRAY, NULL);
     }
-    
+    else
     {
-        agtype_value agtv_vertex;
-        agtv_vertex.type = AGTV_INTEGER;
-        agtv_vertex.val.int_value = 3;  /* Intermediate vertex (shortest weighted route) */
-        agtv_result = push_agtype_value(&state, WAGT_ELEM, &agtv_vertex);
+        /* Convert shortest path to agtype array */
+        ListCell *lc;
+        
+        agtv_result = push_agtype_value(&state, WAGT_BEGIN_ARRAY, NULL);
+        
+        foreach(lc, shortest_path->vertices)
+        {
+            agtype_value agtv_vertex;
+            agtv_vertex.type = AGTV_INTEGER;
+            agtv_vertex.val.int_value = lfirst_oid(lc);
+            agtv_result = push_agtype_value(&state, WAGT_ELEM, &agtv_vertex);
+        }
+        
+        agtv_result = push_agtype_value(&state, WAGT_END_ARRAY, NULL);
     }
-    
-    {
-        agtype_value agtv_vertex;
-        agtv_vertex.type = AGTV_INTEGER;
-        agtv_vertex.val.int_value = 4;  /* End vertex */
-        agtv_result = push_agtype_value(&state, WAGT_ELEM, &agtv_vertex);
-    }
-    
-    agtv_result = push_agtype_value(&state, WAGT_END_ARRAY, NULL);
     
     PG_RETURN_POINTER(agtype_value_to_agtype(agtv_result));
 }
