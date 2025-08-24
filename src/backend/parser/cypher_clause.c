@@ -4109,13 +4109,12 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
     path_const->val.sval.sval = pstrdup("{}"); /* Empty JSON object for now */
     path_const->location = -1;
     
-    /* Cast to agtype */
-    TypeCast *path_agtype = makeNode(TypeCast);
-    path_agtype->arg = (Node *)path_const;
-    path_agtype->typeName = makeTypeNameFromNameList(list_make2(makeString("ag_catalog"), 
-                                                                 makeString("agtype")));
-    path_agtype->location = -1;
-    path_expr = (Node *)path_agtype;
+    /* Convert text to agtype using function call instead of TypeCast */
+    FuncCall *text_to_agtype = makeFuncCall(list_make2(makeString("ag_catalog"),
+                                                       makeString("text_to_agtype")),
+                                           list_make1((Node *)path_const),
+                                           COERCE_EXPLICIT_CALL, -1);
+    path_expr = (Node *)text_to_agtype;
     
     /* Create function call based on path type */
     switch (path->path_type)
