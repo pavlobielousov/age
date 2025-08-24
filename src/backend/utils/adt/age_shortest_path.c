@@ -155,10 +155,6 @@ static YenCandidate *yen_dequeue(YenPriorityQueue *queue);
 static void free_yen_queue(YenPriorityQueue *queue);
 static bool paths_equal(ShortestPath *path1, ShortestPath *path2);
 static ShortestPath *copy_shortest_path(ShortestPath *original);
-static List *get_filtered_neighbors_with_removed(GRAPH_global_context *ggctx, 
-                                               graphid vertex_id, NeighborFilter *filter, 
-                                               bool outgoing, HTAB *removed_edges, 
-                                               HTAB *removed_vertices);
 
 /*
  * Create a new bidirectional BFS queue
@@ -362,7 +358,7 @@ static double get_edge_weight(GRAPH_global_context *ggctx, graphid edge_id,
             {
                 /* Convert numeric to double */
                 weight = DatumGetFloat8(DirectFunctionCall1(numeric_float8,
-                                                           value->val.numeric));
+                                                           NumericGetDatum(value->val.numeric)));
                 break;
             }
         }
@@ -523,85 +519,6 @@ static ShortestPath *copy_shortest_path(ShortestPath *original)
 /*
  * Get filtered neighbors with removed edges and vertices for Yen's algorithm
  */
-static List *get_filtered_neighbors_with_removed(GRAPH_global_context *ggctx, 
-                                               graphid vertex_id, NeighborFilter *filter, 
-                                               bool outgoing, HTAB *removed_edges, 
-                                               HTAB *removed_vertices)
-{
-    List *neighbors = NIL;
-    vertex_entry *ve;
-    ListGraphId *edges;
-    GraphIdNode *node;
-    bool found;
-    
-    ve = get_vertex_entry(ggctx, vertex_id);
-    if (ve == NULL)
-        return NIL;
-    
-    /* Get appropriate edge list based on direction */
-    if (outgoing)
-        edges = get_vertex_entry_edges_out(ve);
-    else
-        edges = get_vertex_entry_edges_in(ve);
-    
-    if (edges == NULL)
-        return NIL;
-    
-    /* Iterate through edges and apply constraints */
-    node = get_list_head(edges);
-    while (node != NULL)
-    {
-        graphid edge_id = get_graphid(node);
-        edge_entry *ee = get_edge_entry(ggctx, edge_id);
-        
-        if (ee != NULL)
-        {
-            /* Check if edge is in removed set */
-            if (removed_edges != NULL)
-            {
-                hash_search(removed_edges, &edge_id, HASH_FIND, &found);
-                if (found)
-                {
-                    node = next_GraphIdNode(node);
-                    continue;
-                }
-            }
-            
-            /* Apply edge constraints early */
-            if (check_edge_constraints(ggctx, edge_id, filter))
-            {
-                graphid neighbor_id;
-                
-                /* Get the appropriate neighbor vertex */
-                if (outgoing)
-                    neighbor_id = get_edge_entry_end_vertex_id(ee);
-                else
-                    neighbor_id = get_edge_entry_start_vertex_id(ee);
-                
-                /* Check if vertex is in removed set */
-                if (removed_vertices != NULL)
-                {
-                    hash_search(removed_vertices, &neighbor_id, HASH_FIND, &found);
-                    if (found)
-                    {
-                        node = next_GraphIdNode(node);
-                        continue;
-                    }
-                }
-                
-                /* Apply vertex constraints early */
-                if (check_vertex_constraints(ggctx, neighbor_id, filter))
-                {
-                    neighbors = lappend_oid(neighbors, neighbor_id);
-                }
-            }
-        }
-        node = next_GraphIdNode(node);
-    }
-    
-    return neighbors;
-}
-
 /*
  * Get neighbors with edge information for weighted algorithms
  * Returns a list of NeighborInfo structures containing both vertex and edge IDs
@@ -1029,6 +946,13 @@ static ShortestPath *dijkstra_shortest_path(GRAPH_global_context *ggctx,
     ShortestPath *result = NULL;
     bool found;
     int expansions = 0;
+    Dijkstra_node start_entry;
+    List *queue = NIL;
+    Dijkstra_node *start_node;
+    List *neighbors;
+    ListCell *lc;
+    Dijkstra_node *queue_node;
+    ListCell *queue_lc;
     
     /* Validate input vertices */
     if (get_vertex_entry(ggctx, start) == NULL || get_vertex_entry(ggctx, end) == NULL)
@@ -1073,7 +997,6 @@ static ShortestPath *dijkstra_shortest_path(GRAPH_global_context *ggctx,
                          HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
     
     /* Initialize start vertex */
-    Dijkstra_node start_entry;
     start_entry.vertex_id = start;
     start_entry.distance = 0.0;
     start_entry.parent_vertex = 0; /* Invalid parent */
@@ -1084,8 +1007,8 @@ static ShortestPath *dijkstra_shortest_path(GRAPH_global_context *ggctx,
     *((Dijkstra_node *)hash_search(distances, &start, HASH_FIND, NULL)) = start_entry;
     
     /* Simple priority queue using list */
-    List *queue = NIL;
-    Dijkstra_node *start_node = palloc(sizeof(Dijkstra_node));
+    queue = NIL;
+    start_node = palloc(sizeof(Dijkstra_node));
     *start_node = start_entry;
     queue = lappend(queue, start_node);
     
@@ -1093,18 +1016,18 @@ static ShortestPath *dijkstra_shortest_path(GRAPH_global_context *ggctx,
     while (list_length(queue) > 0 && expansions < MAX_EXPANSIONS_DEFAULT)
     {
         Dijkstra_node *current = NULL;
-        ListCell *lc, *min_lc = NULL;
+        ListCell *min_lc = NULL;
         double min_distance = DBL_MAX;
         
         /* Find minimum distance node (priority queue simulation) */
-        foreach(lc, queue)
+        foreach(queue_lc, queue)
         {
-            Dijkstra_node *node = (Dijkstra_node *)lfirst(lc);
+            Dijkstra_node *node = (Dijkstra_node *)lfirst(queue_lc);
             if (node->distance < min_distance)
             {
                 min_distance = node->distance;
                 current = node;
-                min_lc = lc;
+                min_lc = queue_lc;
             }
         }
         
@@ -1133,7 +1056,7 @@ static ShortestPath *dijkstra_shortest_path(GRAPH_global_context *ggctx,
         }
         
         /* Explore neighbors */
-        List *neighbors = get_neighbors_with_edges(ggctx, current->vertex_id, 
+        neighbors = get_neighbors_with_edges(ggctx, current->vertex_id, 
                                                   filter, true, removed_edges, 
                                                   removed_vertices);
         
@@ -1168,7 +1091,7 @@ static ShortestPath *dijkstra_shortest_path(GRAPH_global_context *ggctx,
                 {
                     hash_search(distances, &neighbor_id, HASH_ENTER, NULL);
                     /* Add to queue */
-                    Dijkstra_node *queue_node = palloc(sizeof(Dijkstra_node));
+                    queue_node = palloc(sizeof(Dijkstra_node));
                     *queue_node = new_entry;
                     queue = lappend(queue, queue_node);
                 }
@@ -1183,7 +1106,6 @@ static ShortestPath *dijkstra_shortest_path(GRAPH_global_context *ggctx,
     }
     
     /* Cleanup remaining queue items */
-    ListCell *lc;
     foreach(lc, queue)
     {
         pfree(lfirst(lc));
@@ -1836,6 +1758,8 @@ Datum age_k_shortest_paths_cypher(PG_FUNCTION_ARGS)
     int32 k;
     agtype_parse_state *state = NULL;
     agtype_value *agtv_result;
+    agtype_value agtv_path_start;
+    agtype_value agtv_vertex;
     
     /* Check for null arguments */
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
@@ -1864,13 +1788,11 @@ Datum age_k_shortest_paths_cypher(PG_FUNCTION_ARGS)
     
     /* Add first shortest path */
     {
-        agtype_value agtv_path_start;
         agtv_path_start.type = AGTV_ARRAY;
         (void) agtv_path_start; /* Suppress unused warning */
         
         agtv_result = push_agtype_value(&state, WAGT_BEGIN_ARRAY, NULL);
         
-        agtype_value agtv_vertex;
         agtv_vertex.type = AGTV_INTEGER;
         agtv_vertex.val.int_value = 1;  /* Start vertex */
         agtv_result = push_agtype_value(&state, WAGT_ELEM, &agtv_vertex);
@@ -1889,7 +1811,6 @@ Datum age_k_shortest_paths_cypher(PG_FUNCTION_ARGS)
     {
         agtv_result = push_agtype_value(&state, WAGT_BEGIN_ARRAY, NULL);
         
-        agtype_value agtv_vertex;
         agtv_vertex.type = AGTV_INTEGER;
         agtv_vertex.val.int_value = 1;  /* Start vertex */
         agtv_result = push_agtype_value(&state, WAGT_ELEM, &agtv_vertex);
