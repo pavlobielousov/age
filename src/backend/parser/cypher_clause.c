@@ -4097,21 +4097,36 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
     ParseState *pstate = (ParseState *)cpstate;
     List *function_call_list = NIL;
     FuncCall *funcall;
+    List *args = NIL;
+    Node *path_expr;
     
     elog(NOTICE, "transform_shortest_path: called with path_type %d", path->path_type);
     
-    /* Extract start and end vertices from the path */
-    /* For now, we assume a simple path pattern like (a)-[*1..6]-(b) */
-    /* TODO: Extract actual vertex variables and constraints from path->path */
+    /* Create a basic agtype representation of the path pattern */
+    /* For now, create a simple agtype object with the path information */
+    A_Const *path_const = makeNode(A_Const);
+    path_const->val.sval.type = T_String;
+    path_const->val.sval.sval = pstrdup("{}"); /* Empty JSON object for now */
+    path_const->location = -1;
+    
+    /* Cast to agtype */
+    TypeCast *path_agtype = makeNode(TypeCast);
+    path_agtype->arg = (Node *)path_const;
+    path_agtype->typeName = makeTypeNameFromNameList(list_make2(makeString("ag_catalog"), 
+                                                                 makeString("agtype")));
+    path_agtype->location = -1;
+    path_expr = (Node *)path_agtype;
     
     /* Create function call based on path type */
     switch (path->path_type)
     {
         case CYPHER_PATH_SHORTEST:
         {
-            /* Call age_shortest_path_cypher function */
-            funcall = makeFuncCall(list_make1(makeString("age_shortest_path_cypher")),
-                                  NIL, COERCE_EXPLICIT_CALL, -1);
+            /* Call age_shortest_path_cypher function with path expression */
+            args = list_make1(path_expr);
+            funcall = makeFuncCall(list_make2(makeString("ag_catalog"),
+                                             makeString("age_shortest_path_cypher")),
+                                  args, COERCE_EXPLICIT_CALL, -1);
             
             elog(NOTICE, "transform_shortest_path: creating shortestPath function call");
             break;
@@ -4119,9 +4134,16 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
         
         case CYPHER_PATH_K_SHORTEST:
         {
-            /* Call age_k_shortest_paths_cypher function */
-            funcall = makeFuncCall(list_make1(makeString("age_k_shortest_paths_cypher")),
-                                  NIL, COERCE_EXPLICIT_CALL, -1);
+            /* Call age_k_shortest_paths_cypher function with path expression and k value */
+            A_Const *k_const = makeNode(A_Const);
+            k_const->val.ival.type = T_Integer;
+            k_const->val.ival.ival = path->k_value;
+            k_const->location = -1;
+            
+            args = list_make2(path_expr, (Node *)k_const);
+            funcall = makeFuncCall(list_make2(makeString("ag_catalog"),
+                                             makeString("age_k_shortest_paths_cypher")),
+                                  args, COERCE_EXPLICIT_CALL, -1);
             
             elog(NOTICE, "transform_shortest_path: creating kShortestPaths function call");
             break;
@@ -4129,9 +4151,12 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
         
         case CYPHER_PATH_WEIGHTED_SHORTEST:
         {
-            /* Call age_weighted_shortest_path_cypher function */
-            funcall = makeFuncCall(list_make1(makeString("age_weighted_shortest_path_cypher")),
-                                  NIL, COERCE_EXPLICIT_CALL, -1);
+            /* Call age_weighted_shortest_path_cypher function with path expression and weight */
+            Node *weight_arg = path->weight_expr ? path->weight_expr : (Node *)path_const;
+            args = list_make2(path_expr, weight_arg);
+            funcall = makeFuncCall(list_make2(makeString("ag_catalog"),
+                                             makeString("age_weighted_shortest_path_cypher")),
+                                  args, COERCE_EXPLICIT_CALL, -1);
             
             elog(NOTICE, "transform_shortest_path: creating weightedShortestPath function call");
             break;
