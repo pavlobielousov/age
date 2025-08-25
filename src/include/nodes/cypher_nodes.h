@@ -130,6 +130,14 @@ typedef struct cypher_merge
  * pattern
  */
 
+typedef enum cypher_path_type
+{
+    CYPHER_PATH_NORMAL,
+    CYPHER_PATH_SHORTEST,
+    CYPHER_PATH_K_SHORTEST,
+    CYPHER_PATH_WEIGHTED_SHORTEST
+} cypher_path_type;
+
 typedef struct cypher_path
 {
     ExtensibleNode extensible;
@@ -137,6 +145,9 @@ typedef struct cypher_path
     char *var_name;
     char *parsed_var_name;
     int location;
+    cypher_path_type path_type; /* type of path for shortest path algorithms */
+    int k_value; /* for k-shortest paths */
+    Node *weight_expr; /* for weighted shortest paths */
 } cypher_path;
 
 /* ( name :label props ) */

@@ -248,6 +248,9 @@ static Node *transform_cypher_expr_recurse(cypher_parsestate *cpstate,
     }
     case T_FuncCall:
         return transform_FuncCall(cpstate, (FuncCall *)expr);
+    case T_FuncExpr:
+        /* Already transformed function expression */
+        return expr;
     case T_SubLink:
         return transform_SubLink(cpstate, (SubLink *)expr);
     case T_Const:

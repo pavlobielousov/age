@@ -83,15 +83,17 @@
                  ELSE END_P ENDS EXISTS EXPLAIN
                  FALSE_P
                  IN IS
+                 KSHORTESTPATHS
                  LIMIT
                  MATCH MERGE
                  NOT NULL_P
                  OPERATOR OPTIONAL OR ORDER
                  REMOVE RETURN
-                 SET SKIP STARTS
+                 SET SHORTESTPATH SKIP STARTS
                  THEN TRUE_P
                  UNION UNWIND
                  VERBOSE
+                 WEIGHTEDSHORTESTPATH
                  WHEN WHERE WITH
                  XOR
                  YIELD
@@ -1340,6 +1342,71 @@ anonymous_path:
             n->var_name = NULL;
             n->parsed_var_name = NULL;
             n->location = @1;
+            
+            /* Initialize shortest path fields for regular paths */
+            n->path_type = CYPHER_PATH_NORMAL;
+            n->k_value = 0;
+            n->weight_expr = NULL;
+
+            /* Debug output */
+            elog(NOTICE, "Grammar: regular path pattern detected");
+
+            $$ = (Node *)n;
+        }
+    | SHORTESTPATH '(' anonymous_path ')'
+        {
+            cypher_path *n;
+            cypher_path *inner_path = (cypher_path *)$3;
+
+            n = make_ag_node(cypher_path);
+            n->path = inner_path->path;
+            n->var_name = NULL;
+            n->parsed_var_name = NULL;
+            n->location = @1;
+            
+            /* Mark this as a shortest path */
+            n->path_type = CYPHER_PATH_SHORTEST;
+            n->k_value = 1;
+            n->weight_expr = NULL;
+
+            /* Debug output */
+            elog(NOTICE, "Grammar: shortestPath pattern detected");
+
+            $$ = (Node *)n;
+        }
+    | KSHORTESTPATHS '(' anonymous_path ',' expr ')'
+        {
+            cypher_path *n;
+            cypher_path *inner_path = (cypher_path *)$3;
+
+            n = make_ag_node(cypher_path);
+            n->path = inner_path->path;
+            n->var_name = NULL;
+            n->parsed_var_name = NULL;
+            n->location = @1;
+
+            /* Mark this as k-shortest paths */
+            n->path_type = CYPHER_PATH_K_SHORTEST;
+            n->k_value = 0; /* Will be extracted from expr later */
+            n->weight_expr = $5; /* Store the k parameter */
+
+            $$ = (Node *)n;
+        }
+    | WEIGHTEDSHORTESTPATH '(' anonymous_path ',' expr ')'
+        {
+            cypher_path *n;
+            cypher_path *inner_path = (cypher_path *)$3;
+
+            n = make_ag_node(cypher_path);
+            n->path = inner_path->path;
+            n->var_name = NULL;
+            n->parsed_var_name = NULL;
+            n->location = @1;
+
+            /* Mark this as weighted shortest path */
+            n->path_type = CYPHER_PATH_WEIGHTED_SHORTEST;
+            n->k_value = 1;
+            n->weight_expr = $5; /* Store the weight expression */
 
             $$ = (Node *)n;
         }

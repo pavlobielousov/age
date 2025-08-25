@@ -206,6 +206,9 @@ void out_cypher_path(StringInfo str, const ExtensibleNode *node)
     WRITE_STRING_FIELD(var_name);
     WRITE_STRING_FIELD(parsed_var_name);
     WRITE_LOCATION_FIELD(location);
+    WRITE_ENUM_FIELD(path_type, cypher_path_type);
+    WRITE_INT32_FIELD(k_value);
+    WRITE_NODE_FIELD(weight_expr);
 }
 
 /* serialization function for the cypher_node ExtensibleNode. */
