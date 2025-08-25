@@ -3572,18 +3572,18 @@ static List *make_join_condition_for_edge(cypher_parsestate *cpstate,
     }
 }
 
-/* creates a type cast node to agtype */
+/* creates a function call to convert to agtype instead of TypeCast */
 static Node *make_type_cast_to_agtype(Node *arg)
 {
-    TypeCast *n = makeNode(TypeCast);
-    String *ag_catalog = makeString("ag_catalog");
-    String *agtype_str = makeString("agtype");
-    List *qualified_name = list_make2(ag_catalog, agtype_str);
-
-    n->arg = arg;
-    n->typeName = makeTypeNameFromNameList(qualified_name);
-    n->location = -1;
-    return (Node *) n;
+    FuncCall *func_call;
+    
+    /* Use text_to_agtype function call instead of TypeCast */
+    func_call = makeFuncCall(list_make2(makeString("ag_catalog"),
+                                       makeString("text_to_agtype")),
+                            list_make1(arg),
+                            COERCE_EXPLICIT_CALL, -1);
+    
+    return (Node *)func_call;
 }
 
 /*
@@ -4166,15 +4166,13 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
                            errmsg("unsupported shortest path type: %d", path->path_type)));
     }
     
-    /* Transform function call to expression */
-    Node *function_expr = transformExpr(pstate, (Node *)funcall, EXPR_KIND_SELECT_TARGET);
-    
+    /* Don't transform here - let the upper level transform handle it */
     /* Add to target list if path has a variable name */
     if (path->var_name != NULL)
     {
         TargetEntry *te;
         
-        te = makeTargetEntry((Expr *)function_expr,
+        te = makeTargetEntry((Expr *)funcall,
                            list_length(query->targetList) + 1,
                            pstrdup(path->var_name),
                            false);
@@ -4185,7 +4183,7 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
     elog(NOTICE, "transform_shortest_path: created function call for shortest path algorithm");
     
     /* Return the function call list */
-    function_call_list = lappend(function_call_list, function_expr);
+    function_call_list = lappend(function_call_list, (Node *)funcall);
     return function_call_list;
 }
 
