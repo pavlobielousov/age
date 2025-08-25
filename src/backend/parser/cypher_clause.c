@@ -4085,6 +4085,8 @@ static Node *create_property_constraints(cypher_parsestate *cpstate,
 
 static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
                                       cypher_path *path);
+static TargetEntry *transform_shortest_path_create_path_variable(cypher_parsestate *cpstate,
+                                                                cypher_path *path);
 
 /*
  * Transform a shortest path pattern into appropriate function calls
@@ -4094,70 +4096,93 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
 static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
                                       cypher_path *path)
 {
-    ParseState *pstate = (ParseState *)cpstate;
-    List *function_call_list = NIL;
-    FuncCall *funcall;
-    List *args = NIL;
-    Node *path_expr;
+    TargetEntry *path_te;
     
     elog(NOTICE, "transform_shortest_path: called with path_type %d", path->path_type);
     
-    /* Create a basic agtype representation of the path pattern */
-    /* For now, create a simple agtype object with the path information */
-    A_Const *path_const = makeNode(A_Const);
-    path_const->val.sval.type = T_String;
-    path_const->val.sval.sval = pstrdup("{}"); /* Empty JSON object for now */
-    path_const->location = -1;
+    /* Create the path variable if needed, using existing helper */
+    if (path->var_name != NULL)
+    {
+        if (findTarget(query->targetList, path->var_name) != NULL)
+        {
+            ereport(ERROR,
+                    (errcode(ERRCODE_DUPLICATE_ALIAS),
+                    errmsg("variable \"%s\" already exists",
+                            path->var_name),
+                    parser_errposition((ParseState *)cpstate, path->location)));
+        }
+
+        path_te = transform_shortest_path_create_path_variable(cpstate, path);
+        query->targetList = lappend(query->targetList, path_te);
+    }
     
-    /* Convert text to agtype using function call instead of TypeCast */
-    FuncCall *text_to_agtype = makeFuncCall(list_make2(makeString("ag_catalog"),
-                                                       makeString("text_to_agtype")),
-                                           list_make1((Node *)path_const),
-                                           COERCE_EXPLICIT_CALL, -1);
-    path_expr = (Node *)text_to_agtype;
+    elog(NOTICE, "transform_shortest_path: created path variable for shortest path algorithm");
     
-    /* Create function call based on path type */
+    /* Return empty quals list since shortest path doesn't need join quals */
+    return NIL;
+}
+
+/*
+ * Create the shortest path variable using function calls
+ * Similar to transform_match_create_path_variable but for shortest paths
+ */
+static TargetEntry *
+transform_shortest_path_create_path_variable(cypher_parsestate *cpstate,
+                                             cypher_path *path)
+{
+    Oid func_oid;
+    Expr *func_expr = NULL;
+    List *args = NIL;
+    Const *path_const;
+    Const *k_const;
+    Const *weight_const;
+    int resno;
+    
+    /* Create a simple agtype constant for the path pattern (for now, just use null) */
+    path_const = makeNullConst(AGTYPEOID, -1, InvalidOid);
+    
+    /* Create function expression based on path type */
     switch (path->path_type)
     {
         case CYPHER_PATH_SHORTEST:
         {
-            /* Call age_shortest_path_cypher function with path expression */
-            args = list_make1(path_expr);
-            funcall = makeFuncCall(list_make2(makeString("ag_catalog"),
-                                             makeString("age_shortest_path_cypher")),
-                                  args, COERCE_EXPLICIT_CALL, -1);
-            
-            elog(NOTICE, "transform_shortest_path: creating shortestPath function call");
+            /* Get OID for age_shortest_path_cypher function */
+            func_oid = get_ag_func_oid("age_shortest_path_cypher", 1, AGTYPEOID);
+            args = list_make1((Expr *)path_const);
+            func_expr = (Expr *)makeFuncExpr(func_oid, AGTYPEOID, args,
+                                           InvalidOid, InvalidOid,
+                                           COERCE_EXPLICIT_CALL);
             break;
         }
         
         case CYPHER_PATH_K_SHORTEST:
         {
-            /* Call age_k_shortest_paths_cypher function with path expression and k value */
-            A_Const *k_const = makeNode(A_Const);
-            k_const->val.ival.type = T_Integer;
-            k_const->val.ival.ival = path->k_value;
-            k_const->location = -1;
+            /* Get OID for age_k_shortest_paths_cypher function */
+            func_oid = get_ag_func_oid("age_k_shortest_paths_cypher", 2, AGTYPEOID, INT4OID);
             
-            args = list_make2(path_expr, (Node *)k_const);
-            funcall = makeFuncCall(list_make2(makeString("ag_catalog"),
-                                             makeString("age_k_shortest_paths_cypher")),
-                                  args, COERCE_EXPLICIT_CALL, -1);
+            k_const = makeConst(INT4OID, -1, InvalidOid, 4,
+                               Int32GetDatum(path->k_value),
+                               false, true);
             
-            elog(NOTICE, "transform_shortest_path: creating kShortestPaths function call");
+            args = list_make2((Expr *)path_const, (Expr *)k_const);
+            func_expr = (Expr *)makeFuncExpr(func_oid, AGTYPEOID, args,
+                                           InvalidOid, InvalidOid,
+                                           COERCE_EXPLICIT_CALL);
             break;
         }
         
         case CYPHER_PATH_WEIGHTED_SHORTEST:
         {
-            /* Call age_weighted_shortest_path_cypher function with path expression and weight */
-            Node *weight_arg = path->weight_expr ? path->weight_expr : (Node *)path_const;
-            args = list_make2(path_expr, weight_arg);
-            funcall = makeFuncCall(list_make2(makeString("ag_catalog"),
-                                             makeString("age_weighted_shortest_path_cypher")),
-                                  args, COERCE_EXPLICIT_CALL, -1);
+            /* Get OID for age_weighted_shortest_path_cypher function */
+            func_oid = get_ag_func_oid("age_weighted_shortest_path_cypher", 2, AGTYPEOID, AGTYPEOID);
             
-            elog(NOTICE, "transform_shortest_path: creating weightedShortestPath function call");
+            /* Create weight argument - for now use null agtype */
+            weight_const = makeNullConst(AGTYPEOID, -1, InvalidOid);
+            
+            args = list_make2((Expr *)path_const, (Expr *)weight_const);
+            func_expr = (Expr *)makeFuncExpr(func_oid, AGTYPEOID, args,
+                                           InvalidOid, InvalidOid,
+                                           COERCE_EXPLICIT_CALL);
             break;
         }
         
@@ -4165,26 +4190,11 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                            errmsg("unsupported shortest path type: %d", path->path_type)));
     }
-    
-    /* Don't transform here - let the upper level transform handle it */
-    /* Add to target list if path has a variable name */
-    if (path->var_name != NULL)
-    {
-        TargetEntry *te;
-        
-        te = makeTargetEntry((Expr *)funcall,
-                           list_length(query->targetList) + 1,
-                           pstrdup(path->var_name),
-                           false);
-        
-        query->targetList = lappend(query->targetList, te);
-    }
-    
-    elog(NOTICE, "transform_shortest_path: created function call for shortest path algorithm");
-    
-    /* Return the function call list */
-    function_call_list = lappend(function_call_list, (Node *)funcall);
-    return function_call_list;
+
+    resno = cpstate->pstate.p_next_resno++;
+
+    /* create the target entry */
+    return makeTargetEntry(func_expr, resno, path->var_name, false);
 }
 
 /*
