@@ -4097,8 +4097,14 @@ static List *transform_shortest_path(cypher_parsestate *cpstate, Query *query,
                                       cypher_path *path)
 {
     TargetEntry *path_te;
+    List *entities;
     
     elog(NOTICE, "transform_shortest_path: called with path_type %d", path->path_type);
+    
+    /* Transform the entities in the path to create range table entries for variables */
+    entities = transform_match_entities(cpstate, query, path);
+    
+    elog(NOTICE, "transform_shortest_path: processed %d entities", list_length(entities));
     
     /* Create the path variable if needed, using existing helper */
     if (path->var_name != NULL)
